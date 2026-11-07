@@ -534,6 +534,15 @@
   #memberView .actions { display:flex; gap:10px; }
   #memberView .hidden { display:none !important; }
   #memberView pre#preview { font-size:11px; color:#9fd69f; background:rgba(0,20,5,0.8); border-radius:10px; padding:12px; overflow:auto; max-height:240px; margin-top:12px; white-space:pre-wrap; }
+
+  #memberView .onoff { display:flex; flex-shrink:0; border:1px solid rgba(0,200,60,0.25); border-radius:10px; overflow:hidden; }
+  #memberView .onoff button { border:none; background:transparent; color:#6f8a6f; font:inherit; font-size:11px; font-weight:800; letter-spacing:1px; padding:8px 14px; cursor:pointer; transition:.15s; }
+  #memberView .onoff button.on-active { background:linear-gradient(135deg,#25D366,#1ea952); color:#fff; }
+  #memberView .onoff button.off-active { background:linear-gradient(135deg,#c0392b,#8e2a20); color:#fff; }
+  #memberView .btn.danger { background:linear-gradient(135deg,#d63a2b,#8e2a20); box-shadow:0 4px 20px rgba(214,58,43,0.3); }
+  #memberView .btn.sell { background:linear-gradient(135deg,#e67e22,#b9590f); box-shadow:0 4px 20px rgba(230,126,34,0.3); }
+  #memberView .btn.buy { background:linear-gradient(135deg,#25D366,#1ea952); }
+  #memberView .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
 </style>
 </head>
 <body>
@@ -728,17 +737,43 @@
         <h1 style="font-size:20px">EA Martingale <span>DualMagic</span></h1>
         <p>Parameter v5.05</p>
       </div>
-      <div id="form"></div>
-
-      <div class="actions">
-        <button class="btn" id="dlBtn">Download .set</button>
-        <button class="btn ghost" id="copyBtn">Salin</button>
+      <div id="formArea">
+        <div id="form"></div>
+        <button class="btn" id="okBtn">OK &mdash; Setting Selesai</button>
+        <button class="btn ghost" id="resetBtn" style="margin-top:10px">Reset ke Default</button>
       </div>
-      <button class="btn ghost" id="resetBtn" style="margin-top:10px">Reset ke Default</button>
+
+      <div id="summary" class="hidden">
+        <div class="ok" style="font-size:16px;font-weight:700;margin-top:4px">&#10003; Setting OK</div>
+        <pre id="sumList" style="max-height:340px"></pre>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn" id="dlBtn" style="margin-top:0">Download .set</button>
+          <button class="btn ghost" id="copyBtn" style="margin-top:0">Salin</button>
+        </div>
+        <button class="btn ghost" id="editBtn" style="margin-top:10px">Ubah Setting</button>
+      </div>
       <pre id="preview" class="hidden"></pre>
       <p class="hint" style="margin-top:12px;text-align:center">
         Di MT5: buka EA → tab Inputs → Load → pilih file .set ini.
       </p>
+    </div>
+
+    <!-- KONTROL POSISI (hanya untuk CONTROL_USERS) -->
+    <div class="mcard hidden" id="ctrlCard">
+      <div class="mlogo" style="margin-bottom:4px">
+        <h1 style="font-size:18px">Kontrol <span>Posisi</span></h1>
+        <p>Remote ke EA</p>
+      </div>
+      <label for="ghToken">GitHub Token (admin)</label>
+      <input type="password" id="ghToken" autocomplete="off" placeholder="github_pat_...">
+      <div class="hint">Disimpan hanya selama tab terbuka. Token cukup izin Contents: write untuk 1 repo.</div>
+      <button class="btn danger" id="cmdAll" type="button">Clear All Posisi</button>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn buy" id="cmdBuy" type="button" style="margin-top:0">Clear Posisi Buy</button>
+        <button class="btn sell" id="cmdSell" type="button" style="margin-top:0">Clear Posisi Sell</button>
+      </div>
+      <div class="ok" id="ctrlStatus" style="font-size:12px"></div>
+      <p class="hint" style="text-align:center;margin-top:8px">Perintah dibaca EA tiap 30 detik, plus jeda publikasi GitHub Pages (biasanya 1&ndash;3 menit). Untuk darurat, tutup langsung dari MT5.</p>
     </div>
   </div>
 
@@ -805,6 +840,19 @@ const MEMBERS = {
 const TG_ADMIN = 'NPBot_admin';
 const TG_BOT_TOKEN = '';
 const TG_CHAT_ID = '';
+
+/* =====================================================
+   KONTROL POSISI (remote ke EA lewat file di GitHub)
+   - Hanya username di CONTROL_USERS yang melihat kartu kontrol.
+   - Halaman menulis file GH_PATH di repo GH_OWNER/GH_REPO memakai
+     GitHub token yang diketik admin (TIDAK disimpan di source).
+   - EA membaca file itu dan menjalankan perintah baru (cmd_id baru).
+   ===================================================== */
+const CONTROL_USERS = ['member'];   // GANTI: username admin
+const GH_OWNER  = 'npbotofficial';
+const GH_REPO   = '';               // ISI: nama repo tempat ea_control.json berada
+const GH_PATH   = 'ea_control.json';
+const GH_BRANCH = 'main';
 
 async function sha256(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -882,6 +930,7 @@ function toast(msg) {
 
 /* ===== BUILD FORM ===== */
 function buildForm() {
+  $('summary').classList.add('hidden'); $('formArea').classList.remove('hidden');
   const root = $('form'); root.innerHTML = '';
   GROUPS.forEach((g, i) => {
     const d = document.createElement('details');
@@ -892,7 +941,7 @@ function buildForm() {
       const id = 'f_' + it.k;
       if (it.t === 'bool') {
         const r = document.createElement('div'); r.className = 'row';
-        r.innerHTML = `<span>${it.l}</span><label class="switch"><input type="checkbox" id="${id}" ${it.v ? 'checked' : ''}><span class="slider"></span></label>`;
+        r.innerHTML = `<span>${it.l}</span><div class="onoff"><input type="checkbox" id="${id}" class="hidden" ${it.v ? 'checked' : ''}><button type="button">ON</button><button type="button">OFF</button></div>`;
         body.appendChild(r);
       } else if (it.t === 'enum') {
         const opts = it.o.map(([val, name]) => `<option value="${val}" ${val === it.v ? 'selected' : ''}>${name}</option>`).join('');
@@ -902,8 +951,40 @@ function buildForm() {
         body.insertAdjacentHTML('beforeend', `<label for="${id}">${it.l}</label><input type="number" id="${id}" step="${step}" value="${it.v}"><div class="hint">${it.k}</div>`);
       }
     });
+    body.querySelectorAll('.onoff').forEach(box => {
+      const cb = box.querySelector('input'), bOn = box.children[1], bOff = box.children[2];
+      const paint = () => { bOn.className = cb.checked ? 'on-active' : ''; bOff.className = cb.checked ? '' : 'off-active'; };
+      bOn.onclick = () => { cb.checked = true; paint(); };
+      bOff.onclick = () => { cb.checked = false; paint(); };
+      paint();
+    });
     d.appendChild(body); root.appendChild(d);
   });
+}
+
+/* ===== OK / RINGKASAN ===== */
+function summaryText() {
+  const lines = [];
+  GROUPS.forEach(g => g.items.forEach(it => {
+    const el = $('f_' + it.k); let v;
+    if (it.t === 'bool') v = el.checked ? 'ON' : 'OFF';
+    else if (it.t === 'enum') v = el.options[el.selectedIndex].text;
+    else v = el.value;
+    lines.push(it.l + ': ' + v);
+  }));
+  return lines.join('\n');
+}
+function doOk() {
+  const e = validate(); if (e) { toast(e); return; }
+  $('sumList').textContent = summaryText();
+  $('formArea').classList.add('hidden');
+  $('summary').classList.remove('hidden');
+  window.scrollTo(0, 0);
+  toast('Setting OK');
+}
+function editAgain() {
+  $('summary').classList.add('hidden');
+  $('formArea').classList.remove('hidden');
 }
 
 function collect() {
@@ -958,6 +1039,7 @@ function showApp(name) {
   $('loginView').classList.add('hidden');
   $('appView').classList.remove('hidden');
   $('whoName').textContent = name;
+  $('ctrlCard').classList.toggle('hidden', !CONTROL_USERS.includes(name));
   buildForm();
 }
 function showLogin() {
@@ -982,16 +1064,67 @@ async function doLogin() {
   } else {
     fails++;
     if (fails >= 5) { lockUntil = Date.now() + 30000; fails = 0; }
-    $('loginErr').textContent = 'Username atau password salah';
+    $('loginErr').textContent = MEMBERS[u]
+      ? 'Password atau Kode Akses salah'
+      : 'Akun belum aktif. Tunggu admin mengaktifkan akun Anda.';
   }
 }
 
 $('loginBtn').addEventListener('click', doLogin);
 $('pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-$('logoutBtn').addEventListener('click', () => { sessionStorage.removeItem(SESSION_KEY); showLogin(); });
+$('logoutBtn').addEventListener('click', () => { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem('np_gh'); $('ghToken').value = ''; showLogin(); });
+$('okBtn').addEventListener('click', doOk);
+$('editBtn').addEventListener('click', editAgain);
 $('dlBtn').addEventListener('click', download);
 $('copyBtn').addEventListener('click', copyAll);
 $('resetBtn').addEventListener('click', () => { buildForm(); toast('Dikembalikan ke default'); });
+
+/* ===== KONTROL POSISI ===== */
+const CMD_LABEL = { close_all: 'CLEAR ALL POSISI', close_buy: 'CLEAR POSISI BUY', close_sell: 'CLEAR POSISI SELL' };
+const b64d = s => decodeURIComponent(escape(atob(s.replace(/\s/g, ''))));
+const b64e = s => btoa(unescape(encodeURIComponent(s)));
+const savedTok = sessionStorage.getItem('np_gh'); if (savedTok) $('ghToken').value = savedTok;
+
+function ctrlMsg(text, bad) {
+  const el = $('ctrlStatus'); el.textContent = text; el.style.color = bad ? '#ff6b6b' : '#00e676';
+}
+async function sendControl(cmd) {
+  if (!GH_OWNER || !GH_REPO) { ctrlMsg('Isi GH_OWNER dan GH_REPO di script dulu.', true); return; }
+  const token = $('ghToken').value.trim();
+  if (!token) { ctrlMsg('Isi GitHub Token dulu.', true); return; }
+  if (!confirm('Kirim perintah: ' + CMD_LABEL[cmd] + ' ?\n\nPosisi terbuka dan pending order akan ditutup oleh EA.')) return;
+  sessionStorage.setItem('np_gh', token);
+  const btns = ['cmdAll', 'cmdBuy', 'cmdSell'].map($);
+  btns.forEach(b => b.disabled = true);
+  ctrlMsg('Mengirim perintah...', false);
+  try {
+    const base = 'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + GH_PATH;
+    const headers = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    let sha, obj = { enabled: true };
+    const g = await fetch(base + '?ref=' + encodeURIComponent(GH_BRANCH), { headers });
+    if (g.status === 200) {
+      const j = await g.json(); sha = j.sha;
+      try { obj = JSON.parse(b64d(j.content)); } catch (e) { throw new Error('Isi ' + GH_PATH + ' bukan JSON yang valid'); }
+    } else if (g.status === 401) { throw new Error('Token ditolak / kedaluwarsa'); }
+    else if (g.status !== 404) { throw new Error('GitHub membalas ' + g.status); }
+    const now = Date.now();
+    obj.cmd = cmd; obj.cmd_id = now; obj.cmd_ts = Math.floor(now / 1000);
+    const body = { message: 'control: ' + cmd, content: b64e(JSON.stringify(obj, null, 2)), branch: GH_BRANCH };
+    if (sha) body.sha = sha;
+    const r = await fetch(base, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) });
+    if (r.status === 403 || r.status === 404) throw new Error('Token tidak punya izin tulis ke repo ini');
+    if (r.status === 409 || r.status === 422) throw new Error('Konflik saat menyimpan, coba lagi');
+    if (!r.ok) throw new Error('GitHub membalas ' + r.status);
+    ctrlMsg('Terkirim: ' + CMD_LABEL[cmd] + ' (ID ' + obj.cmd_id + '). EA akan menjalankan saat file terbaca berikutnya.', false);
+  } catch (e) {
+    ctrlMsg('Gagal: ' + e.message, true);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
+$('cmdAll').addEventListener('click', () => sendControl('close_all'));
+$('cmdBuy').addEventListener('click', () => sendControl('close_buy'));
+$('cmdSell').addEventListener('click', () => sendControl('close_sell'));
 
 /* ===== TAB LOGIN / DAFTAR ===== */
 function switchAuthTab(which) {
